@@ -368,15 +368,27 @@ impl TemplateApp {
             let v = match self.waveform_type {
                 WaveformType::Sine => amp * (2.0 * std::f32::consts::PI * freq * t).sin(),
                 WaveformType::Square => {
-                    if ((freq * t).fract()) < 0.5 {
-                        amp
+                    // Square wave: +amp for first half of period, -amp for second half, crossing zero at t=0
+                    if ((t * freq) % 1.0) < 0.0 {
+                        // Handle negative t correctly
+                        if ((t * freq).fract() + 1.0) % 1.0 < 0.5 {
+                            amp
+                        } else {
+                            -amp
+                        }
                     } else {
-                        -amp
+                        if ((t * freq).fract()) < 0.5 {
+                            amp
+                        } else {
+                            -amp
+                        }
                     }
                 }
                 WaveformType::Triangle => {
-                    let frac = (freq * t).fract();
-                    amp * (4.0 * (frac - 0.5)).abs() - amp
+                    // Triangle wave: odd function, zero at t=0, peaks at quarter period
+                    let phase = (t * freq + 0.25).fract();
+                    let phase = if phase < 0.0 { phase + 1.0 } else { phase };
+                    amp * (4.0 * phase - 2.0).abs() - amp
                 }
             };
             self.waveform[i] = v;
