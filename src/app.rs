@@ -24,7 +24,7 @@ pub struct TemplateApp {
     zoom: f32,
 }
 
-#[derive(PartialEq, serde::Deserialize, serde::Serialize, Clone, Copy)]
+#[derive(PartialEq, Eq, serde::Deserialize, serde::Serialize, Clone, Copy)]
 pub enum WaveformType {
     Sine,
     Square,
