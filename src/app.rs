@@ -160,7 +160,6 @@ impl eframe::App for TemplateApp {
             );
             let painter = ui.painter_at(rect);
 
-            let n = self.waveform.len();
             let w = rect.width() - 2.0 * padding;
             let h = rect.height() - 2.0 * padding;
             let left = rect.left() + padding;
@@ -184,9 +183,6 @@ impl eframe::App for TemplateApp {
             let mid_y = grid_top + (vdivs / 2.0) * cell_size;
 
             // Adjust scaling for waveform
-            let volts_per_div = self.scale_div_volt as f32;
-            let time_per_div = self.scale_div_ms as f32 / 1000.0; // ms to s
-            let total_time = time_per_div * hdivs;
 
             // Draw square grid
             let grid_color = egui::Color32::from_gray(60);
@@ -207,7 +203,6 @@ impl eframe::App for TemplateApp {
 
                 // Minor increment ticks along the main X axis (center horizontal line)
                 if i == (hdivs / 2.0).round() as usize {
-                    let y = mid_y;
                     let tick_len = cell_size * 0.12;
                     let minor_ticks = 10;
                     let tick_color = egui::Color32::from_rgb(120, 180, 255); // subtle blue
@@ -255,7 +250,6 @@ impl eframe::App for TemplateApp {
 
                 // Minor increment ticks along the main Y axis (center vertical line)
                 if i == (vdivs / 2.0).round() as usize {
-                    let x = grid_left + (hdivs / 2.0) * cell_size;
                     let tick_len = cell_size * 0.12;
                     let minor_ticks = 10;
                     let tick_color = egui::Color32::from_rgb(120, 180, 255); // subtle blue
@@ -295,8 +289,8 @@ impl eframe::App for TemplateApp {
             // Draw border
             painter.rect_stroke(
                 egui::Rect::from_min_max(
-                    egui::pos2(grid_left as f32, grid_top as f32),
-                    egui::pos2(grid_right as f32, grid_bottom as f32),
+                    egui::pos2(grid_left, grid_top),
+                    egui::pos2(grid_right, grid_bottom),
                 ),
                 0.0,
                 egui::Stroke::new(1.5, egui::Color32::DARK_GRAY),
@@ -305,17 +299,14 @@ impl eframe::App for TemplateApp {
 
             // Draw waveform
             let volts_per_div = self.scale_div_volt;
-            let time_per_div = self.scale_div_ms / 1000.0;
             let hdivs = 10.0;
             let n = self.waveform.len();
             let zoom = self.zoom.max(1.0);
-            let center = n / 2;
+
             let mut visible = (n as f32 / zoom).round() as usize;
             if visible % 2 == 0 {
                 visible = visible.saturating_sub(1);
             }
-            let start = center.saturating_sub(visible / 2);
-            let end = (start + visible).min(n);
 
             let width = cell_size * hdivs;
             // Center waveform at (0,0): index 0 is at grid center, waveform extends left and right
