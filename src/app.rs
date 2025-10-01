@@ -22,6 +22,10 @@ pub struct TemplateApp {
     waveform_type: WaveformType,
     #[serde(skip)]
     zoom: f32,
+    #[serde(skip)]
+    pan_offset_x: f32,
+    #[serde(skip)]
+    pan_offset_y: f32,
 }
 
 #[derive(PartialEq, Eq, serde::Deserialize, serde::Serialize, Clone, Copy)]
@@ -46,6 +50,8 @@ impl Default for TemplateApp {
             phase: 0.0,
             waveform_type: WaveformType::Sine,
             zoom: 1.0,
+            pan_offset_x: 0.0,
+            pan_offset_y: 0.0,
         }
     }
 }
@@ -74,11 +80,6 @@ impl eframe::App for TemplateApp {
 
     /// Called each time the UI needs repainting, which may be many times per second.
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Update waveform if running
-        if self.running {
-            self.generate_waveform();
-        }
-
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
                 let is_web = cfg!(target_arch = "wasm32");
@@ -114,6 +115,12 @@ impl eframe::App for TemplateApp {
                         WaveformType::Triangle,
                         "Triangle",
                     );
+                    ui.add_space(8.0);
+
+                    if ui.button("Reset Pan").clicked() {
+                        self.pan_offset_x = 0.0;
+                        self.pan_offset_y = 0.0;
+                    }
                 });
 
             ui.add_space(8.0);
@@ -148,35 +155,52 @@ impl eframe::App for TemplateApp {
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            // Draw waveform with square grid and padding
-            let padding = 12.0;
-            let (rect, _response) = ui.allocate_exact_size(
+            // Draw waveform with square grid using all available space
+            let (rect, response) = ui.allocate_exact_size(
                 egui::vec2(ui.available_width(), ui.available_height()),
-                egui::Sense::hover(),
+                egui::Sense::drag(),
             );
+
+            // Handle scroll wheel for zoom
+            if response.hovered() {
+                let scroll = ui.input(|i| i.raw_scroll_delta.y);
+                if scroll != 0.0 {
+                    // Positive scroll.y is up (zoom in), negative is down (zoom out)
+                    let zoom_speed = 1.1;
+                    if scroll > 0.0 {
+                        self.zoom = (self.zoom * zoom_speed).min(10.0);
+                    } else {
+                        self.zoom = (self.zoom / zoom_speed).max(1.0);
+                    }
+                    ctx.request_repaint();
+                }
+            }
+
+            // Handle mouse drag for panning
+            if response.dragged() {
+                let delta = response.drag_delta();
+                self.pan_offset_x += delta.x;
+                self.pan_offset_y += delta.y;
+                ctx.request_repaint();
+            }
+
             let painter = ui.painter_at(rect);
 
-            let w = rect.width() - 2.0 * padding;
-            let h = rect.height() - 2.0 * padding;
-            let left = rect.left() + padding;
-            let top = rect.top() + padding;
+            let w = rect.width();
+            let h = rect.height();
+            let left = rect.left();
+            let top = rect.top();
 
             // Fixed grid: 10 horizontal, 8 vertical divisions
             let hdivs = 10.0_f32;
             let vdivs = 8.0_f32;
 
-            // Apply zoom globally to cell_size (grid, ticks, waveform, etc.)
-            let base_cell_size = w.min(h / vdivs * hdivs) / hdivs;
-            let cell_size = base_cell_size * self.zoom; // scale everything by zoom
+            // Always use a square cell size, scaled by zoom
+            let cell_size = (w / hdivs).min(h / vdivs) * self.zoom;
 
-            // Recompute cell_size to fit both axes, center grid
-            let grid_width = cell_size * hdivs;
-            let grid_height = cell_size * vdivs;
-            let grid_left = left + (w - grid_width) / 2.0;
-            let grid_top = top + (h - grid_height) / 2.0;
-            let grid_right = grid_left + grid_width;
-            let grid_bottom = grid_top + grid_height;
-            let mid_y = grid_top + (vdivs / 2.0) * cell_size;
+            // Define the screen position of (0,0): center of panel plus pan offset
+            let origin_x = left + w / 2.0 + self.pan_offset_x;
+            let origin_y = top + h / 2.0 + self.pan_offset_y;
 
             // Adjust scaling for waveform
 
@@ -186,34 +210,45 @@ impl eframe::App for TemplateApp {
             let stroke = egui::Stroke::new(1.0, grid_color);
             let strong_stroke = egui::Stroke::new(1.5, strong_grid_color);
 
-            // Vertical grid lines
-            // Vertical grid lines
-            for i in 0..=hdivs as usize {
-                let x = grid_left + (i as f32) * cell_size;
-                let s = if i == (hdivs / 2.0).round() as usize {
-                    &strong_stroke
-                } else {
-                    &stroke
-                };
-                painter.line_segment([egui::pos2(x, grid_top), egui::pos2(x, grid_bottom)], *s);
+            // Infinite grid: draw enough lines to fill the visible area, based on pan and zoom
+            // Compute the visible range in grid coordinates, centered at (0,0) = (origin_x, origin_y)
+            let min_x = ((left - origin_x) / cell_size).floor() as isize - 2;
+            let max_x = ((left + w - origin_x) / cell_size).ceil() as isize + 2;
+            let min_y = ((top - origin_y) / cell_size).floor() as isize - 2;
+            let max_y = ((top + h - origin_y) / cell_size).ceil() as isize + 2;
+
+            // Vertical grid lines (x = 0 is the y-axis)
+            for i in min_x..=max_x {
+                let x = origin_x + (i as f32) * cell_size;
+                let s = if i == 0 { &strong_stroke } else { &stroke };
+                painter.line_segment([egui::pos2(x, top), egui::pos2(x, top + h)], *s);
 
                 // Minor increment ticks along the main X axis (center horizontal line)
-                if i == (hdivs / 2.0).round() as usize {
-                    let tick_len = cell_size * 0.12;
+                if i == 0 {
                     let minor_ticks = 10;
-                    let tick_color = egui::Color32::from_rgb(120, 180, 255); // subtle blue
-                    for div in 0..(vdivs as usize) {
-                        let div_top = grid_top + div as f32 * cell_size;
+                    let minor_tick_len = cell_size * 0.10;
+                    let major_tick_len = cell_size * 0.22;
+                    let tick_color = egui::Color32::from_gray(140);
+                    for div in min_y..=max_y {
+                        let div_top = origin_y + (div as f32) * cell_size;
+                        // Major tick at the division, but skip if at axis (0,0) to avoid double-drawing
+                        if !(i == 0 && div == 0) {
+                            painter.line_segment(
+                                [
+                                    egui::pos2(x - major_tick_len / 2.0, div_top),
+                                    egui::pos2(x + major_tick_len / 2.0, div_top),
+                                ],
+                                egui::Stroke::new(1.5, tick_color),
+                            );
+                        }
+                        // Minor ticks between divisions
                         for m in 1..minor_ticks {
                             let frac = m as f32 / minor_ticks as f32;
-                            if frac == 0.0 {
-                                continue;
-                            }
                             let y_tick = div_top + frac * cell_size;
                             painter.line_segment(
                                 [
-                                    egui::pos2(x - tick_len / 2.0, y_tick),
-                                    egui::pos2(x + tick_len / 2.0, y_tick),
+                                    egui::pos2(x - minor_tick_len / 2.0, y_tick),
+                                    egui::pos2(x + minor_tick_len / 2.0, y_tick),
                                 ],
                                 egui::Stroke::new(1.0, tick_color),
                             );
@@ -222,8 +257,8 @@ impl eframe::App for TemplateApp {
                 }
 
                 // Draw small ticks only on the main X axis (center horizontal line)
-                if (hdivs / 2.0).round() as usize == hdivs as usize / 2 {
-                    let y = mid_y;
+                if i == 0 {
+                    let y = origin_y;
                     let tick_len = cell_size * 0.25;
                     painter.line_segment(
                         [
@@ -234,33 +269,38 @@ impl eframe::App for TemplateApp {
                     );
                 }
             }
-            // Horizontal grid lines
-            for i in 0..=vdivs as usize {
-                let y = grid_top + (i as f32) * cell_size;
-                let s = if i == (vdivs / 2.0).round() as usize {
-                    &strong_stroke
-                } else {
-                    &stroke
-                };
-                painter.line_segment([egui::pos2(grid_left, y), egui::pos2(grid_right, y)], *s);
+            // Horizontal grid lines (y = 0 is the x-axis)
+            for j in min_y..=max_y {
+                let y = origin_y + (j as f32) * cell_size;
+                let s = if j == 0 { &strong_stroke } else { &stroke };
+                painter.line_segment([egui::pos2(left, y), egui::pos2(left + w, y)], *s);
 
                 // Minor increment ticks along the main Y axis (center vertical line)
-                if i == (vdivs / 2.0).round() as usize {
-                    let tick_len = cell_size * 0.12;
+                if j == 0 {
                     let minor_ticks = 10;
-                    let tick_color = egui::Color32::from_rgb(120, 180, 255); // subtle blue
-                    for div in 0..(hdivs as usize) {
-                        let div_left = grid_left + div as f32 * cell_size;
+                    let minor_tick_len = cell_size * 0.10;
+                    let major_tick_len = cell_size * 0.22;
+                    let tick_color = egui::Color32::from_gray(140);
+                    for div in min_x..=max_x {
+                        let div_left = origin_x + (div as f32) * cell_size;
+                        // Major tick at the division, but skip if at axis (0,0) to avoid double-drawing
+                        if !(j == 0 && div == 0) {
+                            painter.line_segment(
+                                [
+                                    egui::pos2(div_left, y - major_tick_len / 2.0),
+                                    egui::pos2(div_left, y + major_tick_len / 2.0),
+                                ],
+                                egui::Stroke::new(1.5, tick_color),
+                            );
+                        }
+                        // Minor ticks between divisions
                         for m in 1..minor_ticks {
                             let frac = m as f32 / minor_ticks as f32;
-                            if frac == 0.0 {
-                                continue;
-                            }
                             let x_tick = div_left + frac * cell_size;
                             painter.line_segment(
                                 [
-                                    egui::pos2(x_tick, y - tick_len / 2.0),
-                                    egui::pos2(x_tick, y + tick_len / 2.0),
+                                    egui::pos2(x_tick, y - minor_tick_len / 2.0),
+                                    egui::pos2(x_tick, y + minor_tick_len / 2.0),
                                 ],
                                 egui::Stroke::new(1.0, tick_color),
                             );
@@ -269,8 +309,8 @@ impl eframe::App for TemplateApp {
                 }
 
                 // Draw small ticks only on the main Y axis (center vertical line)
-                if (vdivs / 2.0).round() as usize == vdivs as usize / 2 {
-                    let x = grid_left + (hdivs / 2.0) * cell_size;
+                if j == 0 {
+                    let x = origin_x;
                     let tick_len = cell_size * 0.25;
                     painter.line_segment(
                         [
@@ -283,46 +323,57 @@ impl eframe::App for TemplateApp {
             }
 
             // Draw border
-            painter.rect_stroke(
-                egui::Rect::from_min_max(
-                    egui::pos2(grid_left, grid_top),
-                    egui::pos2(grid_right, grid_bottom),
-                ),
-                0.0,
-                egui::Stroke::new(1.5, egui::Color32::DARK_GRAY),
-                egui::StrokeKind::Middle,
-            );
+            // No border rectangle needed for infinite grid
 
             // Draw waveform
             let volts_per_div = self.scale_div_volt;
-            let hdivs = 10.0;
-            let n = self.waveform.len();
-            let zoom = self.zoom.max(1.0);
+            let freq = self.freq;
+            let amplitude = self.amplitude;
+            let ms_per_div = self.scale_div_ms;
 
-            let mut visible = (n as f32 / zoom).round() as usize;
-            if visible % 2 == 0 {
-                visible = visible.saturating_sub(1);
-            }
+            // Calculate number of points based on screen width (like infinite grid)
+            // Use every 2 pixels for good performance while maintaining smooth curves
+            let pixel_step = 2.0;
+            let visible_points = (w / pixel_step) as usize;
+            let mut points: Vec<egui::Pos2> = Vec::with_capacity(visible_points);
 
-            let width = cell_size * hdivs;
-            // Center waveform at (0,0): index 0 is at grid center, waveform extends left and right
-            let grid_center_x = grid_left + (hdivs / 2.0) * cell_size;
-            let half_visible = visible / 2;
-            let center_index = n / 2;
-            let points: Vec<egui::Pos2> = (0..visible)
-                .filter_map(|j| {
-                    let i = center_index as isize + (j as isize - half_visible as isize);
-                    if i >= 0 && (i as usize) < n {
-                        let v = self.waveform[i as usize];
-                        let x = grid_center_x
-                            + (j as f32 - half_visible as f32) * (width / (visible as f32 - 1.0));
-                        let y = mid_y - (v / volts_per_div) * cell_size;
-                        Some(egui::pos2(x, y))
-                    } else {
-                        None
+            // Calculate the visible x range in screen coordinates
+            let x_start = left;
+            let x_end = left + w;
+
+            for i in 0..visible_points {
+                // Calculate screen x position
+                let x = x_start + (i as f32) * pixel_step;
+                // Calculate distance from (0,0) marker in pixels
+                let dx = x - origin_x;
+                // Convert to grid divisions
+                let dx_grid = dx / cell_size;
+                // Convert to time in ms (center is t=0)
+                let t_ms = dx_grid * ms_per_div;
+                // Convert ms to seconds
+                let t = t_ms / 1000.0;
+                // Calculate phase for this time
+                let phase = 2.0 * std::f32::consts::PI * freq * t;
+                // Evaluate waveform at this phase
+                let v = match self.waveform_type {
+                    WaveformType::Sine => amplitude * phase.sin(),
+                    WaveformType::Square => {
+                        // Square wave: positive when sin of phase is positive
+                        if phase.sin() >= 0.0 {
+                            amplitude
+                        } else {
+                            -amplitude
+                        }
                     }
-                })
-                .collect();
+                    WaveformType::Triangle => {
+                        // Triangle wave using asin of sin to create triangle shape
+                        let triangle_phase = (2.0 * phase.sin()).clamp(-1.0, 1.0).asin();
+                        amplitude * (2.0 / std::f32::consts::PI) * triangle_phase
+                    }
+                };
+                let y = origin_y - (v / volts_per_div) * cell_size;
+                points.push(egui::pos2(x, y));
+            }
 
             painter.add(egui::Shape::line(
                 points,
@@ -365,30 +416,23 @@ impl TemplateApp {
         let center = n as isize / 2;
         for i in 0..n {
             let t = (i as isize - center) as f32 * dt;
+            let phase = 2.0 * std::f32::consts::PI * freq * t;
             let v = match self.waveform_type {
-                WaveformType::Sine => amp * (2.0 * std::f32::consts::PI * freq * t).sin(),
+                WaveformType::Sine => amp * phase.sin(),
                 WaveformType::Square => {
-                    // Square wave: +amp for first half of period, -amp for second half, crossing zero at t=0
-                    if ((t * freq) % 1.0) < 0.0 {
-                        // Handle negative t correctly
-                        if ((t * freq).fract() + 1.0) % 1.0 < 0.5 {
-                            amp
-                        } else {
-                            -amp
-                        }
-                    } else {
-                        if ((t * freq).fract()) < 0.5 {
-                            amp
-                        } else {
-                            -amp
-                        }
-                    }
+                    // Square wave: positive when in first half of period
+                    let period_pos = (phase / (2.0 * std::f32::consts::PI)).rem_euclid(1.0);
+                    if period_pos < 0.5 { amp } else { -amp }
                 }
                 WaveformType::Triangle => {
-                    // Triangle wave: odd function, zero at t=0, peaks at quarter period
-                    let phase = (t * freq + 0.25).fract();
-                    let phase = if phase < 0.0 { phase + 1.0 } else { phase };
-                    amp * (4.0 * phase - 2.0).abs() - amp
+                    // Triangle wave: sawtooth that goes up and down
+                    let period_pos = (phase / (2.0 * std::f32::consts::PI)).rem_euclid(1.0);
+                    let triangle_val = if period_pos < 0.5 {
+                        4.0 * period_pos - 1.0
+                    } else {
+                        3.0 - 4.0 * period_pos
+                    };
+                    amp * triangle_val
                 }
             };
             self.waveform[i] = v;
