@@ -94,68 +94,64 @@ impl eframe::App for TemplateApp {
             });
         });
 
-        egui::CentralPanel::default().show(ctx, |ui| {
+        egui::SidePanel::left("side_panel").show(ctx, |ui| {
             ui.heading("Virtual Oscilloscope");
-
-            ui.horizontal(|ui| {
-                ui.label("Waveform:");
-                egui::ComboBox::from_id_salt("waveform_type")
-                    .selected_text(match self.waveform_type {
-                        WaveformType::Sine => "Sine",
-                        WaveformType::Square => "Square",
-                        WaveformType::Triangle => "Triangle",
-                    })
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut self.waveform_type, WaveformType::Sine, "Sine");
-                        ui.selectable_value(
-                            &mut self.waveform_type,
-                            WaveformType::Square,
-                            "Square",
-                        );
-                        ui.selectable_value(
-                            &mut self.waveform_type,
-                            WaveformType::Triangle,
-                            "Triangle",
-                        );
-                    });
-            });
-
-            ui.horizontal(|ui| {
-                ui.label("Frequency (Hz):");
-                ui.add(egui::Slider::new(&mut self.freq, 0.1..=1000.0).logarithmic(true));
-                ui.label(format!("{:.1}", self.freq));
-            });
-
-            ui.horizontal(|ui| {
-                ui.label("Zoom:");
-                ui.add(egui::Slider::new(&mut self.zoom, 1.0..=10.0).logarithmic(true));
-                ui.label(format!("{:.1}x", self.zoom));
-            });
-
-            ui.horizontal(|ui| {
-                ui.label("Amplitude (V):");
-                ui.add(egui::Slider::new(&mut self.amplitude, 0.1..=20.0));
-                ui.label(format!("{:.2}", self.amplitude));
-            });
-
-            ui.horizontal(|ui| {
-                ui.label("Time/div (ms):");
-                ui.add(egui::Slider::new(&mut self.scale_div_ms, 0.1..=200.0));
-                ui.label(format!("{:.2}", self.scale_div_ms));
-            });
-
-            ui.horizontal(|ui| {
-                ui.label("Volts/div:");
-                ui.add(egui::Slider::new(&mut self.scale_div_volt, 0.1..=20.0));
-                ui.label(format!("{:.2}", self.scale_div_volt));
-            });
 
             ui.separator();
 
+            ui.label("Waveform:");
+            egui::ComboBox::from_id_salt("waveform_type")
+                .selected_text(match self.waveform_type {
+                    WaveformType::Sine => "Sine",
+                    WaveformType::Square => "Square",
+                    WaveformType::Triangle => "Triangle",
+                })
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut self.waveform_type, WaveformType::Sine, "Sine");
+                    ui.selectable_value(&mut self.waveform_type, WaveformType::Square, "Square");
+                    ui.selectable_value(
+                        &mut self.waveform_type,
+                        WaveformType::Triangle,
+                        "Triangle",
+                    );
+                });
+
+            ui.add_space(8.0);
+
+            ui.label("Frequency (Hz):");
+            ui.add(egui::Slider::new(&mut self.freq, 0.1..=500.0).logarithmic(true));
+            ui.label(format!("{:.1}", self.freq));
+
+            ui.add_space(8.0);
+
+            ui.label("Zoom:");
+            ui.add(egui::Slider::new(&mut self.zoom, 1.0..=10.0).logarithmic(true));
+            ui.label(format!("{:.1}x", self.zoom));
+
+            ui.add_space(8.0);
+
+            ui.label("Amplitude (V):");
+            ui.add(egui::Slider::new(&mut self.amplitude, 0.1..=200.0));
+            ui.label(format!("{:.2}", self.amplitude));
+
+            ui.add_space(8.0);
+
+            ui.label("Time/div (ms):");
+            ui.add(egui::Slider::new(&mut self.scale_div_ms, 0.1..=200.0));
+            ui.label(format!("{:.2}", self.scale_div_ms));
+
+            ui.add_space(8.0);
+
+            ui.label("Volts/div:");
+            ui.add(egui::Slider::new(&mut self.scale_div_volt, 0.1..=200.0));
+            ui.label(format!("{:.2}", self.scale_div_volt));
+        });
+
+        egui::CentralPanel::default().show(ctx, |ui| {
             // Draw waveform with square grid and padding
             let padding = 12.0;
             let (rect, _response) = ui.allocate_exact_size(
-                egui::vec2(ui.available_width(), 900.0),
+                egui::vec2(ui.available_width(), ui.available_height()),
                 egui::Sense::hover(),
             );
             let painter = ui.painter_at(rect);
